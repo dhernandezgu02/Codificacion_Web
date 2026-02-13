@@ -9,10 +9,8 @@ import time
 from openai import OpenAI
 from typing import Callable, Optional, Tuple, Set, Dict, List, Any
 
-# Import API key from config
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-from config import openai_api_key_Codifiacion
+# Get API key from environment variable
+openai_api_key_Codifiacion = os.getenv('OPENAI_API_KEY', '')
 
 # Configure OpenAI API
 client = OpenAI(api_key=openai_api_key_Codifiacion)

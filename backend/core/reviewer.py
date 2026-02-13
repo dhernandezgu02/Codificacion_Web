@@ -14,8 +14,8 @@ from openpyxl.styles import PatternFill
 # or instantiate a new one. Since logic.py already has the client, we can pass it or re-import.
 # For simplicity, we'll re-import the key from config.
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-from config import openai_api_key_Codifiacion
+# Get API key from environment variable
+openai_api_key_Codifiacion = os.getenv('OPENAI_API_KEY', '')
 
 openai.api_key = openai_api_key_Codifiacion
 
