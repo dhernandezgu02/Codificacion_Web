@@ -6,12 +6,14 @@ interface ConfigurationProps {
   columns: string[];
   onStartProcessing: (config: ProcessingConfig) => void;
   onBack: () => void;
+  mode?: 'codify' | 'review';
 }
 
 const Configuration: React.FC<ConfigurationProps> = ({
   columns,
   onStartProcessing,
   onBack,
+  mode = 'codify'
 }) => {
   const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
   const [columnConfigs, setColumnConfigs] = useState<Record<string, ColumnConfig>>({});
@@ -295,7 +297,7 @@ const Configuration: React.FC<ConfigurationProps> = ({
                       : 'btn-disabled w-full'
                   }
                 >
-                  Iniciar Procesamiento
+                  {mode === 'review' ? 'Iniciar Revisión' : 'Iniciar Codificación'}
                 </button>
                 <button onClick={onBack} className="btn-secondary w-full">
                   Volver

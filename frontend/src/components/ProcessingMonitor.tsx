@@ -92,14 +92,41 @@ const ProcessingMonitor: React.FC<ProcessingMonitorProps> = ({
     setResuming(true);
     setIsError(false);
     try {
-        await axios.post(`${API_URL}/api/resume`, {
+        // Since we don't have a dedicated /resume endpoint yet, we use /process
+        // but we need to pass the config again. Ideally, the backend should be able to 
+        // resume from session state without full config re-submission.
+        // HOWEVER, our backend `process_survey_task` re-reads config from session.
+        // So we just need to trigger it.
+        // But `start_processing` endpoint requires full `ProcessRequest` body.
+        
+        // Let's use the 'config' stored in parent state? 
+        // We don't have access to it here in props.
+        // A better way: Backend should have a simple /resume/{session_id} endpoint
+        // Or we modify startProcessing to be smarter.
+        
+        // Actually, let's assume the backend routes update I did handled `start_processing` 
+        // to update session config. If we just call it again with minimal info?
+        // No, pydantic validation will fail.
+        
+        // Temporary workaround: The user shouldn't have to re-enter config.
+        // We will assume the frontend `App.tsx` has the config and we should pass it down
+        // OR we add a proper `/api/resume` endpoint in backend.
+        // Given I already modified backend to support `skip_crash_row` in `ProcessRequest`,
+        // I should probably add a `/api/resume` endpoint that reads existing config from session
+        // and just triggers the task.
+        
+        // Let's rely on a new endpoint I'll creating right now in backend: /api/resume
+        
+        await axios.post(`${API_URL}/api/process/resume`, {
             session_id: sessionId,
-            skip_current: skipCurrent
+            skip_crash_row: skipCurrent
         });
+        
         toast.success(skipCurrent ? 'Saltando error y reanudando...' : 'Reanudando procesamiento...');
     } catch (error) {
         console.error("Resume error:", error);
-        toast.error('No se pudo reanudar el proceso');
+        const errMsg = handleAPIError(error);
+        toast.error(`No se pudo reanudar: ${errMsg}`);
         setIsError(true);
     } finally {
         setResuming(false);

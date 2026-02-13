@@ -3,7 +3,7 @@
  */
 
 // Application state types
-export type AppStep = 'upload' | 'configure' | 'manual-coding' | 'processing' | 'results';
+export type AppStep = 'home' | 'upload' | 'upload-review' | 'configure' | 'manual-coding' | 'processing' | 'results';
 
 export type ProcessingStatus = 'idle' | 'processing' | 'completed' | 'error' | 'stopped';
 

@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { toast } from 'react-toastify';
+import HomeMenu from './components/HomeMenu';
 import FileUpload from './components/FileUpload';
+import FileUploadReview from './components/FileUploadReview';
 import Configuration from './components/Configuration';
 import ProcessingMonitor from './components/ProcessingMonitor';
 import Results from './components/Results';
 import ManualCoding from './components/ManualCoding';
 import { wsClient } from './services/websocket';
-import { startProcessing, handleAPIError, cleanupSession } from './services/api';
+import { startProcessing, startReview, handleAPIError, cleanupSession } from './services/api';
 import type {
   AppStep,
   UploadResponse,
@@ -15,12 +17,22 @@ import type {
 } from './types';
 
 function App() {
-  const [step, setStep] = useState<AppStep>('upload');
+  const [step, setStep] = useState<AppStep>('home');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [columns, setColumns] = useState<string[]>([]);
   const [results, setResults] = useState<ProcessingResults | null>(null);
   const [pendingConfig, setPendingConfig] = useState<ProcessingConfig | null>(null);
+  const [mode, setMode] = useState<'codify' | 'review'>('codify'); // New state for mode
+
+  const handleMenuSelection = (option: 'codify' | 'review') => {
+    setMode(option);
+    if (option === 'codify') {
+        setStep('upload');
+    } else {
+        setStep('upload-review');
+    }
+  };
 
   const handleFilesUploaded = (data: UploadResponse) => {
     // If there was a previous session (e.g. from back button), clean it up
@@ -34,7 +46,80 @@ function App() {
 
   const handleConfigComplete = (config: ProcessingConfig) => {
     setPendingConfig(config);
-    setStep('manual-coding');
+    
+    // Logic branch:
+    // If mode is 'codify', go to manual coding first
+    // If mode is 'review', skip manual coding and start review immediately
+    if (mode === 'codify') {
+        setStep('manual-coding');
+    } else {
+        handleStartReviewProcess(config);
+    }
+  };
+
+  const handleStartReviewProcess = async (config: ProcessingConfig) => {
+      if (!sessionId) return;
+      
+      try {
+          // Connect WS
+          wsClient.connect(sessionId);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // For review mode, we first need to 'configure' the session with columns
+          // but startReview endpoint might expect config to be saved already?
+          // Actually, startReview endpoint takes NO config, it reads from session.
+          // BUT session config is updated in startProcessing usually.
+          // We need to update session config manually first?
+          // startProcessing does: update_session_config -> add_task
+          // startReview does: get_session -> check files -> get config -> add_task
+          
+          // So we need to save the config to the session BEFORE calling startReview.
+          // Currently we don't have an endpoint just to save config.
+          // Let's reuse startProcessing but pointing to a different task?
+          // No, better to update startReview to accept config OR add saveConfig endpoint.
+          // OR, simpler: We call startProcessing but with a flag? 
+          // No, review is a separate endpoint.
+          
+          // Let's assume for now we use 'startProcessing' endpoint but with a flag/param?
+          // Actually, looking at backend, startProcessing calls 'process_survey_task'.
+          // startReview calls 'process_review_task'.
+          
+          // We need a way to save config for review.
+          // I will use 'startProcessing' but effectively hijack it? No.
+          
+          // Let's modify the backend 'start_review' to accept config in body, similar to 'process'.
+          // For now, as I cannot change backend in this specific file update, I will assume
+          // I need to add a way to save config.
+          
+          // Wait! startProcessing saves config. 
+          // If I call startProcessing, it starts coding.
+          // I want to start REVIEW.
+          
+          // Workaround: Call startProcessing with a flag "review_only"? 
+          // Or update backend (which I did in previous turns) to support this? 
+          // I haven't updated start_review to accept config yet.
+          
+          // Let's assume I will update the backend to allow passing config to start-review.
+          // For now, I will simulate it by calling a new endpoint or modified one.
+          
+          // To make it work with current backend:
+          // We need to call an endpoint that saves config.
+          // 'process' endpoint saves config then starts task.
+          
+          // I will implement a "save-config" call in API (frontend side) that effectively 
+          // prepares the session, or I'll update backend to accept config in start-review.
+          // I'll update backend logic in next step.
+          
+          // Assuming updated backend:
+          const response = await startReview(sessionId, config); // Pass config here
+          setTaskId(response.task_id);
+          setStep('processing');
+          toast.success('Revisión iniciada');
+          
+      } catch (error) {
+          const errorMessage = handleAPIError(error);
+          toast.error(`Error al iniciar revisión: ${errorMessage}`);
+      }
   };
 
   const handleStartProcessing = async (config: ProcessingConfig) => {
@@ -77,28 +162,48 @@ function App() {
     }
 
     wsClient.disconnect(); // Disconnect when resetting the app
-    setStep('upload');
+    setStep('home'); // Go back to home menu
     setSessionId(null);
     setTaskId(null);
     setColumns([]);
     setResults(null);
+    setMode('codify');
   };
 
   const handleBackToUpload = () => {
-    setStep('upload');
+    if (mode === 'codify') {
+        setStep('upload');
+    } else {
+        setStep('upload-review');
+    }
   };
 
   return (
     <div className="App">
+      {step === 'home' && (
+        <HomeMenu onSelectOption={handleMenuSelection} />
+      )}
+
       {step === 'upload' && (
-        <FileUpload onFilesUploaded={handleFilesUploaded} />
+        <FileUpload 
+            onFilesUploaded={handleFilesUploaded} 
+            onBack={() => setStep('home')}
+        />
+      )}
+
+      {step === 'upload-review' && (
+        <FileUploadReview 
+            onFilesUploaded={handleFilesUploaded}
+            onBack={() => setStep('home')}
+        />
       )}
 
       {step === 'configure' && (
         <Configuration
           columns={columns}
-          onStartProcessing={handleConfigComplete} // Change: go to manual coding first
+          onStartProcessing={handleConfigComplete}
           onBack={handleBackToUpload}
+          mode={mode} // Pass mode to customize text (e.g. "Start Review" instead of "Start Coding")
         />
       )}
 

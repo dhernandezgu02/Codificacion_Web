@@ -6,9 +6,10 @@ import type { UploadedFiles, UploadResponse } from '../types';
 
 interface FileUploadProps {
   onFilesUploaded: (data: UploadResponse) => void;
+  onBack?: () => void;
 }
 
-const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
+const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded, onBack }) => {
   const [files, setFiles] = useState<UploadedFiles>({
     responses: null,
     codes: null,
@@ -60,18 +61,24 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4">
-      <div className="max-w-4xl mx-auto">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-800 mb-2">
-            Codificación de Encuestas con IA
-          </h1>
-          <p className="text-gray-600">
-            Sube tus archivos Excel para comenzar el procesamiento automático
-          </p>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4 flex items-center justify-center">
+      <div className="max-w-4xl w-full bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div className="bg-blue-600 px-8 py-6 flex items-center justify-between">
+            <div>
+                <h2 className="text-2xl font-bold text-white">Cargar Archivos</h2>
+                <p className="text-blue-100 mt-1">Sube el archivo de respuestas y el archivo de códigos</p>
+            </div>
+            {onBack && (
+                <button 
+                    onClick={onBack}
+                    className="text-white hover:bg-blue-700 px-3 py-1 rounded transition"
+                >
+                    Volver
+                </button>
+            )}
         </div>
 
-        <div className="card space-y-6">
+        <div className="p-8">
           {/* Responses File Dropzone */}
           <div>
             <label className="label">
@@ -179,26 +186,18 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
           </div>
 
           {/* Upload Button */}
-          <div className="flex justify-end space-x-4">
-            <button
-              onClick={() => setFiles({ responses: null, codes: null })}
-              disabled={!files.responses && !files.codes}
-              className={
-                files.responses || files.codes
-                  ? 'btn-secondary'
-                  : 'btn-disabled'
-              }
-            >
-              Limpiar
-            </button>
+          <div className="flex justify-center mt-8">
             <button
               onClick={handleUpload}
               disabled={!files.responses || !files.codes || uploading}
-              className={
-                files.responses && files.codes && !uploading
-                  ? 'btn-primary'
-                  : 'btn-disabled'
-              }
+              className={`
+                px-8 py-4 rounded-xl font-bold text-lg shadow-lg transform transition-all duration-200
+                ${
+                  !files.responses || !files.codes || uploading
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 hover:scale-105 hover:shadow-xl'
+                }
+              `}
             >
               {uploading ? (
                 <span className="flex items-center">
@@ -225,7 +224,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
                   Subiendo...
                 </span>
               ) : (
-                'Cargar Archivos'
+                'Continuar a Configuración'
               )}
             </button>
           </div>
