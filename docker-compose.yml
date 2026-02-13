@@ -9,6 +9,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
     networks:
+      - internal
       - dokploy-network
     restart: unless-stopped
 
@@ -18,11 +19,14 @@ services:
     ports:
       - "5170:80"
     networks:
+      - internal
       - dokploy-network
     restart: unless-stopped
     depends_on:
       - backend
 
 networks:
+  internal:
+    driver: bridge
   dokploy-network:
     external: true
