@@ -51,6 +51,7 @@ class ProcessRequest(BaseModel):
     max_new_labels: int = 0 # Deprecated, now per column
     start_code: int = 501
     manual_mappings: Dict[str, Dict[str, str]] = {} # New field for manual codes
+    skip_crash_row: bool = False # Resume option: skip the next uncoded row (assumed to be crash cause)
 
 class AnalyzeRequest(BaseModel):
     session_id: str
@@ -414,8 +415,10 @@ async def process_survey_task(session_id: str, config: Dict[str, Any], is_resume
         # 2. CODING PHASE
         await ws_manager.emit_status(session_id, 'processing', 'Codificando respuestas...')
         
+        skip_crash_row = config.get('skip_crash_row', False)
+        
         processed_responses_df, updated_codes_df = await loop.run_in_executor(
-            None, processor.process, responses_df, codes_df, config, save_intermediate
+            None, processor.process, responses_df, codes_df, config, save_intermediate, skip_crash_row
         )
         
         # Save Final Coding Result
@@ -453,7 +456,62 @@ async def process_survey_task(session_id: str, config: Dict[str, Any], is_resume
 
 
 
-@router.post("/process", response_model=ProcessResponse)
+class ResumeRequest(BaseModel):
+    session_id: str
+    skip_crash_row: bool = False
+
+@router.post("/process/resume", response_model=ProcessResponse)
+async def resume_processing(
+    request: ResumeRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Resume processing for a session
+    """
+    try:
+        if not session_manager.session_exists(request.session_id):
+            raise HTTPException(status_code=404, detail="Session not found")
+            
+        session = session_manager.get_session(request.session_id)
+        
+        # Check if already processing
+        if session['status'] == 'processing':
+            raise HTTPException(status_code=400, detail="Session is already processing")
+            
+        # Get existing config
+        config = session.get('config')
+        if not config:
+            raise HTTPException(status_code=400, detail="Configuration missing")
+            
+        # Update config with skip flag
+        config['skip_crash_row'] = request.skip_crash_row
+        session_manager.update_session_config(request.session_id, config)
+        
+        # Reuse existing task ID or create new one?
+        # Creating new one is safer for tracking
+        import uuid
+        task_id = str(uuid.uuid4())
+        session_manager.set_task_id(request.session_id, task_id)
+        
+        active_tasks[request.session_id] = {
+            'task_id': task_id,
+            'status': 'resuming'
+        }
+        
+        # Start background task with is_resume=True
+        background_tasks.add_task(process_survey_task, request.session_id, config, is_resume=True)
+        
+        return ProcessResponse(
+            task_id=task_id,
+            status='resuming',
+            message='Resuming processing'
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in resume_processing endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 async def start_processing(
     request: ProcessRequest,
     background_tasks: BackgroundTasks
@@ -492,7 +550,8 @@ async def start_processing(
             'question_column': request.question_column,
             'max_new_labels': request.max_new_labels,
             'start_code': request.start_code,
-            'manual_mappings': request.manual_mappings
+            'manual_mappings': request.manual_mappings,
+            'skip_crash_row': request.skip_crash_row # Pass this along
         }
         
         # Save config to session
@@ -525,6 +584,63 @@ async def start_processing(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+
+class ResumeRequest(BaseModel):
+    session_id: str
+    skip_crash_row: bool = False
+
+@router.post("/process/resume", response_model=ProcessResponse)
+async def resume_processing(
+    request: ResumeRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Resume processing for a session
+    """
+    try:
+        if not session_manager.session_exists(request.session_id):
+            raise HTTPException(status_code=404, detail="Session not found")
+            
+        session = session_manager.get_session(request.session_id)
+        
+        # Check if already processing
+        if session['status'] == 'processing':
+            raise HTTPException(status_code=400, detail="Session is already processing")
+            
+        # Get existing config
+        config = session.get('config')
+        if not config:
+            raise HTTPException(status_code=400, detail="Configuration missing")
+            
+        # Update config with skip flag
+        config['skip_crash_row'] = request.skip_crash_row
+        session_manager.update_session_config(request.session_id, config)
+        
+        # Reuse existing task ID or create new one?
+        # Creating new one is safer for tracking
+        import uuid
+        task_id = str(uuid.uuid4())
+        session_manager.set_task_id(request.session_id, task_id)
+        
+        active_tasks[request.session_id] = {
+            'task_id': task_id,
+            'status': 'resuming'
+        }
+        
+        # Start background task with is_resume=True
+        background_tasks.add_task(process_survey_task, request.session_id, config, is_resume=True)
+        
+        return ProcessResponse(
+            task_id=task_id,
+            status='resuming',
+            message='Resuming processing'
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in resume_processing endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @router.get("/progress/{session_id}", response_model=ProgressResponse)
 async def get_progress(session_id: str):

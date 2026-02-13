@@ -422,11 +422,12 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
                      limit_77: Dict, limit_labels: Dict,
                      progress_callback: Optional[Callable] = None,
                      status_callback: Optional[Callable] = None,
-                     save_callback: Optional[Callable[[pd.DataFrame, pd.DataFrame], None]] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
+                     save_callback: Optional[Callable[[pd.DataFrame, pd.DataFrame], None]] = None,
+                     skip_first_uncoded: bool = False) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Process all responses and assign codes"""
     global PROCESS_STOPPED, MODIFIED_CELLS, questions_dict
     
-    print("EJECUTANDO PROCESS_RESPONSES")
+    print(f"EJECUTANDO PROCESS_RESPONSES (Skip first uncoded: {skip_first_uncoded})")
     
     # Extract column names from config
     response_columns = [col['name'] for col in columns_config]
@@ -525,6 +526,26 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
                     processed_records += 1
                     if progress_callback and total_records > 0:
                         progress_callback(processed_records / total_records)
+                    continue
+                
+                # Found an uncoded cell!
+                if skip_first_uncoded:
+                    print(f"Skipping crash row for response: {response}")
+                    # Assign error/skip code
+                    assigned_codes = "99" # Or specific code for skipped/error
+                    
+                    responses_df.loc[mask, code_column] = assigned_codes
+                    
+                    modified_indices = responses_df.index[mask].tolist()
+                    for idx in modified_indices:
+                        MODIFIED_CELLS.add((idx, code_column))
+                    
+                    processed_records += 1
+                    if progress_callback and total_records > 0:
+                        progress_callback(processed_records / total_records)
+                        
+                    # Reset flag so we only skip ONE
+                    skip_first_uncoded = False
                     continue
 
                 for question in relevant_questions:
