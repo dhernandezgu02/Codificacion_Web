@@ -512,6 +512,8 @@ async def resume_processing(
     except Exception as e:
         print(f"Error in resume_processing endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.post("/process", response_model=ProcessResponse)
 async def start_processing(
     request: ProcessRequest,
     background_tasks: BackgroundTasks
