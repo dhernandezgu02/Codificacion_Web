@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
 import { wsClient } from '../services/websocket';
-import { stopProcessing, handleAPIError } from '../services/api';
+import { stopProcessing, handleAPIError, getResponsesDownloadUrl, getCodesDownloadUrl, API_URL } from '../services/api';
 import type { ProgressUpdate, StatusUpdate, ProcessingResults } from '../types';
+import axios from 'axios';
 
 interface ProcessingMonitorProps {
   sessionId: string;
@@ -19,6 +20,9 @@ const ProcessingMonitor: React.FC<ProcessingMonitorProps> = ({
   const [statusMessage, setStatusMessage] = useState('Iniciando procesamiento...');
   const [currentColumn, setCurrentColumn] = useState('');
   const [stopping, setStopping] = useState(false);
+  const [isError, setIsError] = useState(false);
+  const [codingCompleted, setCodingCompleted] = useState(false);
+  const [resuming, setResuming] = useState(false);
 
   useEffect(() => {
     // Connect to WebSocket
@@ -37,10 +41,18 @@ const ProcessingMonitor: React.FC<ProcessingMonitorProps> = ({
 
     wsClient.onStatus((update: StatusUpdate) => {
       setStatusMessage(update.message);
+      
+      // Handle special status for coding completion
+      if (update.status === 'coding_completed') {
+        setCodingCompleted(true);
+        toast.info('Codificación inicial finalizada. Puedes descargar los avances.');
+      }
     });
 
     wsClient.onError((error: string) => {
       toast.error(`Error: ${error}`);
+      setIsError(true);
+      setStatusMessage(`Error: ${error}`);
     });
 
     wsClient.onComplete((results: ProcessingResults) => {
@@ -66,6 +78,7 @@ const ProcessingMonitor: React.FC<ProcessingMonitorProps> = ({
       try {
         await stopProcessing(sessionId);
         toast.info('Procesamiento detenido');
+        setIsError(true); // Treat stop as a state where we can resume
       } catch (error) {
         const errorMessage = handleAPIError(error);
         toast.error(`Error al detener: ${errorMessage}`);
@@ -73,6 +86,31 @@ const ProcessingMonitor: React.FC<ProcessingMonitorProps> = ({
         setStopping(false);
       }
     }
+  };
+
+  const handleResume = async (skipCurrent: boolean = false) => {
+    setResuming(true);
+    setIsError(false);
+    try {
+        await axios.post(`${API_URL}/api/resume`, {
+            session_id: sessionId,
+            skip_current: skipCurrent
+        });
+        toast.success(skipCurrent ? 'Saltando error y reanudando...' : 'Reanudando procesamiento...');
+    } catch (error) {
+        console.error("Resume error:", error);
+        toast.error('No se pudo reanudar el proceso');
+        setIsError(true);
+    } finally {
+        setResuming(false);
+    }
+  };
+
+  const downloadIntermediate = (type: 'responses' | 'codes') => {
+      let url = '';
+      if (type === 'responses') url = getResponsesDownloadUrl(sessionId);
+      else if (type === 'codes') url = getCodesDownloadUrl(sessionId);
+      window.open(url, '_blank');
   };
 
   const progressPercentage = Math.round(progress * 100);
@@ -172,7 +210,7 @@ const ProcessingMonitor: React.FC<ProcessingMonitorProps> = ({
                     Procesamiento
                   </p>
                   <p className="text-lg font-bold text-blue-900">
-                    En curso
+                    {isError ? 'Pausado/Error' : 'En curso'}
                   </p>
                 </div>
               </div>
@@ -225,26 +263,69 @@ const ProcessingMonitor: React.FC<ProcessingMonitorProps> = ({
                 </div>
                 <div>
                   <p className="text-xs text-purple-600 font-medium">
-                    Tiempo Real
+                    Estado
                   </p>
                   <p className="text-lg font-bold text-purple-900">
-                    WebSocket
+                    {codingCompleted ? 'Revisión' : 'Codificación'}
                   </p>
                 </div>
               </div>
             </div>
           </div>
 
+          {/* Action Buttons (Error State) */}
+          {isError && (
+            <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4 bg-red-50 p-4 rounded-lg border border-red-200">
+                <button
+                    onClick={() => handleResume(false)}
+                    disabled={resuming}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded shadow transition flex items-center justify-center gap-2"
+                >
+                    {resuming ? (
+                        <>
+                            <svg className="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                            Reanudando...
+                        </>
+                    ) : (
+                        'Reanudar Codificación'
+                    )}
+                </button>
+                <button
+                    onClick={() => handleResume(true)}
+                    disabled={resuming}
+                    className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded shadow transition"
+                >
+                    Saltar fila actual y Reanudar
+                </button>
+            </div>
+          )}
+
+          {/* Coding Completed Actions (Early Download) */}
+          {codingCompleted && !isError && (
+             <div className="bg-green-50 p-4 rounded-lg border border-green-200 mt-4">
+                <p className="text-sm text-green-800 font-bold mb-2">¡Codificación inicial lista! Puedes descargar los resultados preliminares:</p>
+                <div className="flex gap-3">
+                    <button onClick={() => downloadIntermediate('responses')} className="text-xs bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700">Descargar Respuestas</button>
+                    <button onClick={() => downloadIntermediate('codes')} className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded hover:bg-purple-700">Descargar Códigos</button>
+                </div>
+             </div>
+          )}
+
           {/* Stop Button */}
-          <div className="flex justify-center pt-4">
-            <button
-              onClick={handleStop}
-              disabled={stopping}
-              className={stopping ? 'btn-disabled' : 'btn-danger'}
-            >
-              {stopping ? 'Deteniendo...' : 'Detener Procesamiento'}
-            </button>
-          </div>
+          {!isError && (
+            <div className="flex justify-center pt-4">
+                <button
+                onClick={handleStop}
+                disabled={stopping}
+                className={stopping ? 'btn-disabled' : 'btn-danger'}
+                >
+                {stopping ? 'Deteniendo...' : 'Detener Procesamiento'}
+                </button>
+            </div>
+          )}
 
           {/* Tips */}
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">

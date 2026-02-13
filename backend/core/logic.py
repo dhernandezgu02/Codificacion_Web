@@ -9,8 +9,10 @@ import time
 from openai import OpenAI
 from typing import Callable, Optional, Tuple, Set, Dict, List, Any
 
-# Get API key from environment variable
-openai_api_key_Codifiacion = os.getenv('OPENAI_API_KEY', '')
+# Import API key from config
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+from config import openai_api_key_Codifiacion
 
 # Configure OpenAI API
 client = OpenAI(api_key=openai_api_key_Codifiacion)
@@ -380,7 +382,8 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
                      columns_config: List[Dict], question_column: str,
                      limit_77: Dict, limit_labels: Dict,
                      progress_callback: Optional[Callable] = None,
-                     status_callback: Optional[Callable] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
+                     status_callback: Optional[Callable] = None,
+                     save_callback: Optional[Callable[[pd.DataFrame, pd.DataFrame], None]] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Process all responses and assign codes"""
     global PROCESS_STOPPED, MODIFIED_CELLS, questions_dict
     
@@ -439,6 +442,11 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
                 responses_df, [col], questions_dict, updated_codes_df,
                 progress_callback, status_callback, total_records, check_stop
             )
+            
+            # Save progress after processing 'other' column
+            if save_callback:
+                 save_callback(responses_df, updated_codes_df)
+                 
         else:
             code_column = f'C{col}'
             if code_column not in responses_df.columns:
@@ -551,6 +559,11 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
                         progress_callback(processed_records / total_records)
                     
                     break
+                    
+        # Save progress after processing each column
+        if save_callback:
+             print(f"Guardando progreso intermedio después de la columna {col}")
+             save_callback(responses_df, updated_codes_df)
 
     return responses_df, updated_codes_df
 

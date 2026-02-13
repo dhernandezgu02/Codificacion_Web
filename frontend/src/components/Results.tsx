@@ -1,14 +1,19 @@
-import React from 'react';
-import { getResponsesDownloadUrl, getCodesDownloadUrl, getReviewedDownloadUrl } from '../services/api';
+import React, { useState } from 'react';
+import { getResponsesDownloadUrl, getCodesDownloadUrl, getReviewedDownloadUrl, startReview, handleAPIError } from '../services/api';
 import type { ProcessingResults } from '../types';
+import { toast } from 'react-toastify';
 
 interface ResultsProps {
   sessionId: string;
   results: ProcessingResults;
   onReset: () => void;
+  onStartReview: () => void;
 }
 
-const Results: React.FC<ResultsProps> = ({ sessionId, results, onReset }) => {
+const Results: React.FC<ResultsProps> = ({ sessionId, results, onReset, onStartReview }) => {
+  const [cleaningUp, setCleaningUp] = useState(false);
+  const [startingReview, setStartingReview] = useState(false);
+
   const handleDownload = (type: 'responses' | 'codes' | 'reviewed') => {
     let url = '';
     if (type === 'responses') url = getResponsesDownloadUrl(sessionId);
@@ -16,6 +21,35 @@ const Results: React.FC<ResultsProps> = ({ sessionId, results, onReset }) => {
     else if (type === 'reviewed') url = getReviewedDownloadUrl(sessionId);
     
     window.location.href = url;
+  };
+
+  const handleStartReview = async () => {
+    setStartingReview(true);
+    try {
+      await startReview(sessionId);
+      onStartReview(); // Trigger parent state change to show monitoring again
+    } catch (error) {
+      const msg = handleAPIError(error);
+      toast.error(`Error al iniciar revisión: ${msg}`);
+      setStartingReview(false);
+    }
+  };
+
+  const handleFinish = async () => {
+    try {
+        setCleaningUp(true);
+        // Call cleanup endpoint
+        await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/cleanup/${sessionId}`, {
+            method: 'DELETE'
+        });
+        onReset();
+    } catch (e) {
+        console.error("Error cleaning up:", e);
+        // Reset anyway
+        onReset();
+    } finally {
+        setCleaningUp(false);
+    }
   };
 
   return (
@@ -134,7 +168,7 @@ const Results: React.FC<ResultsProps> = ({ sessionId, results, onReset }) => {
         </div>
 
         {/* Review Results Summary */}
-        {results.review_results && (
+        {results.review_results ? (
           <div className="card mb-6">
             <h2 className="text-2xl font-semibold text-gray-800 mb-6">
               Resultados de la Revisión Automática
@@ -192,6 +226,37 @@ const Results: React.FC<ResultsProps> = ({ sessionId, results, onReset }) => {
                   </svg>
                 </div>
               </div>
+            </div>
+          </div>
+        ) : (
+          /* Optional Review Action */
+          <div className="card mb-6 border-l-4 border-yellow-400 bg-yellow-50">
+            <div className="flex items-start justify-between">
+                <div>
+                    <h2 className="text-xl font-semibold text-yellow-800 mb-2">
+                    Revisión Automática (Opcional)
+                    </h2>
+                    <p className="text-yellow-700 mb-4">
+                    ¿Deseas que la IA revise la codificación para detectar y corregir posibles errores?
+                    </p>
+                </div>
+                <button
+                    onClick={handleStartReview}
+                    disabled={startingReview}
+                    className="px-6 py-3 bg-yellow-500 hover:bg-yellow-600 text-white font-bold rounded-lg shadow transition flex items-center"
+                >
+                    {startingReview ? (
+                        <>
+                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Iniciando...
+                        </>
+                    ) : (
+                        'Iniciar Revisión'
+                    )}
+                </button>
             </div>
           </div>
         )}
@@ -327,14 +392,18 @@ const Results: React.FC<ResultsProps> = ({ sessionId, results, onReset }) => {
 
         {/* Actions */}
         <div className="card">
-          <div className="flex flex-col sm:flex-row gap-4">
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <button
-              onClick={onReset}
-              className="btn-primary flex-1"
+              onClick={handleFinish}
+              disabled={cleaningUp}
+              className="px-8 py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg shadow-lg transform transition hover:scale-105"
             >
-              Procesar Nuevos Archivos
+              {cleaningUp ? 'Finalizando...' : 'Finalizar Codificación y Limpiar'}
             </button>
           </div>
+          <p className="text-center text-sm text-gray-500 mt-4">
+            Al finalizar, se eliminarán los archivos temporales de esta sesión.
+          </p>
         </div>
       </div>
     </div>

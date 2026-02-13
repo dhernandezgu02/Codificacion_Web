@@ -27,7 +27,7 @@ load_dotenv()
 TEMP_DIR = os.getenv('TEMP_DIR', 'temp_uploads')
 SESSION_TIMEOUT_HOURS = int(os.getenv('SESSION_TIMEOUT_HOURS', '24'))
 MAX_FILE_SIZE_MB = int(os.getenv('MAX_FILE_SIZE_MB', '50'))
-CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:5170,http://localhost:5173,http://localhost:3000').split(',')
+CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:5173,http://localhost:3000').split(',')
 
 # Create Socket.IO server
 sio = socketio.AsyncServer(
@@ -155,6 +155,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8020,
+        port=8000,
         reload=True
     )

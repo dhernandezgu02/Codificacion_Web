@@ -124,6 +124,7 @@ function App() {
           sessionId={sessionId}
           results={results}
           onReset={handleReset}
+          onStartReview={() => setStep('processing')}
         />
       )}
     </div>

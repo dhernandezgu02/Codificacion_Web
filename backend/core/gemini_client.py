@@ -4,8 +4,9 @@ import time
 from google import genai
 from google.genai import types
 
-# Get API key from environment variable
-gemini_api_key = os.getenv('GEMINI_API_KEY', '')
+# Import API key from config
+sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+from config import gemini_api_key
 
 # Model Selection
 # User requested "Gemini 3 Flash". 

@@ -13,10 +13,7 @@ import type {
 
 // Get API URL from environment or use default (relative in prod, localhost in dev)
 // @ts-ignore
-// In production, use empty string (same origin - nginx proxies to backend)
-// In development, point directly to backend
-// @ts-ignore
-export const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8020' : '');
+export const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '');
 
 // Create axios instance with default config
 const apiClient = axios.create({
@@ -72,6 +69,16 @@ export const startProcessing = async (
     ...config,
   });
 
+  return response.data;
+};
+
+/**
+ * Start review process independently
+ */
+export const startReview = async (sessionId: string): Promise<ProcessResponse> => {
+  const response = await apiClient.post<ProcessResponse>('/api/start-review', {
+    session_id: sessionId
+  });
   return response.data;
 };
 

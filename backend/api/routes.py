@@ -207,91 +207,82 @@ async def upload_files(
 
 
 
-async def process_survey_task(session_id: str, config: Dict[str, Any]):
+class ReviewRequest(BaseModel):
+    session_id: str
+
+@router.post("/start-review", response_model=ProcessResponse)
+async def start_review(
+    request: ReviewRequest,
+    background_tasks: BackgroundTasks
+):
     """
-    Background task to process survey responses
-    
-    Args:
-        session_id: Session identifier
-        config: Processing configuration
+    Start the review process independently
     """
-    import asyncio  # Importar asyncio aquí
     try:
-        # Update status
+        if not session_manager.session_exists(request.session_id):
+            raise HTTPException(status_code=404, detail="Session not found")
+            
+        session = session_manager.get_session(request.session_id)
+        
+        # Check if already processing
+        if session['status'] == 'processing':
+            raise HTTPException(status_code=400, detail="Session is currently busy")
+            
+        # Get paths (assuming they exist from previous step)
+        results = session.get('results', {})
+        output_responses = results.get('output_responses')
+        output_codes = results.get('output_codes')
+        
+        if not output_responses or not os.path.exists(output_responses):
+             # Try to find uploaded files if this is a "Review Only" session (TODO)
+             raise HTTPException(status_code=400, detail="Files to review not found. Please code first.")
+
+        # Get config
+        config = session.get('config')
+        if not config:
+             raise HTTPException(status_code=400, detail="Configuration missing")
+
+        # Generate task ID
+        import uuid
+        task_id = str(uuid.uuid4())
+        session_manager.set_task_id(request.session_id, task_id)
+        
+        active_tasks[request.session_id] = {
+            'task_id': task_id,
+            'status': 'starting_review'
+        }
+        
+        background_tasks.add_task(process_review_task, request.session_id, config, output_responses, output_codes)
+        
+        return ProcessResponse(
+            task_id=task_id,
+            status='started',
+            message='Review started'
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in start_review: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def process_review_task(session_id: str, config: Dict[str, Any], responses_path: str, codes_path: str):
+    """Background task for review"""
+    import asyncio
+    try:
         session_manager.update_session_status(session_id, 'processing')
-        await ws_manager.emit_status(session_id, 'processing', 'Iniciando procesamiento...')
-        
-        # Get file paths
-        responses_path = session_manager.get_file_path(session_id, 'responses')
-        codes_path = session_manager.get_file_path(session_id, 'codes')
-        
-        if not responses_path or not codes_path:
-            raise ValueError("Files not found for session")
-        
-        # Create processor
-        processor = SurveyProcessor(session_id)
-        
-        # Set up WebSocket callbacks
-        progress_cb, status_cb = SurveyProcessor.create_websocket_callbacks(
-            ws_manager, session_id
-        )
-        processor.set_progress_callback(progress_cb)
-        processor.set_status_callback(status_cb)
-        
-        # Load files
-        await ws_manager.emit_status(session_id, 'processing', 'Cargando archivos...')
-        
-        # Run loading in executor to avoid blocking
-        loop = asyncio.get_running_loop()
-        responses_df, codes_df = await loop.run_in_executor(
-            None, processor.load_files, responses_path, codes_path
-        )
-        
-        # Process
-        await ws_manager.emit_status(session_id, 'processing', 'Procesando respuestas...')
-        
-        # Run processing in executor to avoid blocking
-        processed_responses_df, updated_codes_df = await loop.run_in_executor(
-            None, processor.process, responses_df, codes_df, config
-        )
-        
-        # Save results
-        await ws_manager.emit_status(session_id, 'processing', 'Guardando resultados de codificación...')
-        
-        # Generate output paths
-        import os
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_dir = os.path.dirname(responses_path)
-        
-        output_responses_path = os.path.join(
-            session_dir, f"responses_processed_{timestamp}.xlsx"
-        )
-        output_codes_path = os.path.join(
-            session_dir, f"codes_updated_{timestamp}.xlsx"
-        )
-        
-        processor.save_results(
-            processed_responses_df, updated_codes_df,
-            output_responses_path, output_codes_path
-        )
-        
-        # --- Start Review Process ---
         await ws_manager.emit_status(session_id, 'processing', 'Iniciando revisión automática...')
         
-        # Helper to bridge reviewer progress to websocket
+        loop = asyncio.get_running_loop()
+        
         def review_progress_cb(progress: float):
             try:
-                # Review happens after coding, so we map 0-1 progress to a "Reviewing" state
-                # or just reuse the progress bar but maybe reset it or keep it at 100%?
-                # The user wants to see progress of review. 
-                # Let's say review is a separate phase. We'll emit progress events.
                 asyncio.run_coroutine_threadsafe(
                     ws_manager.emit_progress(session_id, progress, "Revisando asignaciones..."),
                     loop
                 )
             except Exception as e:
-                print(f"Error in review progress callback: {e}")
+                print(f"Error in review progress: {e}")
 
         def review_status_cb(message: str):
             try:
@@ -300,34 +291,156 @@ async def process_survey_task(session_id: str, config: Dict[str, Any]):
                     loop
                 )
             except Exception as e:
-                print(f"Error in review status callback: {e}")
+                print(f"Error in review status: {e}")
 
-        # Extract columns to check (all columns processed)
         columns_to_check = [col['name'] for col in config['columns']]
-        
-        reviewer = SurveyReviewer(output_responses_path, output_codes_path, columns_to_check)
+        reviewer = SurveyReviewer(responses_path, codes_path, columns_to_check)
         reviewer.set_progress_callback(review_progress_cb)
         reviewer.set_status_callback(review_status_cb)
         
-        # Run reviewer in executor
         review_results = await loop.run_in_executor(None, reviewer.run)
         
-        # Update session with results (including review)
-        results = {
-            'processed_columns': len(config.get('columns', [])),
-            'total_records': len(processed_responses_df),
-            'output_responses': output_responses_path,
-            'output_codes': output_codes_path,
-            'review_results': review_results,
-            'output_reviewed': review_results['output_file']
-        }
+        # Update results
+        current_results = session_manager.get_session(session_id).get('results', {})
+        current_results['review_results'] = review_results
+        current_results['output_reviewed'] = review_results['output_file']
         
-        session_manager.update_session_results(session_id, results)
+        session_manager.update_session_results(session_id, current_results)
         session_manager.update_session_status(session_id, 'completed')
         
-        # Emit completion
-        await ws_manager.emit_complete(session_id, results)
-        await ws_manager.emit_status(session_id, 'completed', 'Procesamiento y revisión completados')
+        await ws_manager.emit_complete(session_id, current_results)
+        await ws_manager.emit_status(session_id, 'review_completed', 'Revisión finalizada')
+        
+        if session_id in active_tasks:
+            del active_tasks[session_id]
+            
+    except Exception as e:
+        print(f"Error in review task: {e}")
+        session_manager.update_session_status(session_id, 'error')
+        await ws_manager.emit_error(session_id, str(e))
+        if session_id in active_tasks:
+            del active_tasks[session_id]
+
+
+async def process_survey_task(session_id: str, config: Dict[str, Any], is_resume: bool = False):
+    """
+    Background task to process survey responses
+    """
+    import asyncio
+    import os
+    from datetime import datetime
+    
+    try:
+        # Determine paths (might be different if resuming)
+        # Actually, we always read from 'responses' and 'codes' original uploads
+        # BUT if we are resuming, we should ideally read from the INTERMEDIATE file if it exists.
+        # However, logic.py logic is: Read input, Process (skipping existing), Write output.
+        # So we can just point the "responses_path" to the INTERMEDIATE file if it exists?
+        # NO, logic.py reads "responses_path" as input.
+        # To make resume work, we need to OVERWRITE the 'responses' file in the session with the latest processed version
+        # whenever we save intermediate results. 
+        # OR we just rely on logic.py finding the filled cells.
+        # Let's check `logic.process_response`:
+        # `if has_code: continue`
+        # This implies it checks the DATAFRAME in memory. 
+        # When we restart, we load from disk. So the disk file MUST be updated.
+        
+        responses_path = session_manager.get_file_path(session_id, 'responses')
+        codes_path = session_manager.get_file_path(session_id, 'codes')
+        
+        if not responses_path or not codes_path:
+             raise ValueError("Files not found")
+
+        # Session Dir for outputs
+        session_dir = os.path.dirname(responses_path)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # These are the FINAL output paths. 
+        # Ideally we keep reusing a "working" file or we manage versions.
+        # For simplicity, let's say we have a "current_progress.xlsx"
+        current_progress_responses = os.path.join(session_dir, "responses_working.xlsx")
+        current_progress_codes = os.path.join(session_dir, "codes_working.xlsx")
+        
+        # If resuming and working files exist, use them as input?
+        # logic.load_files reads from path. 
+        # If we want to resume, we should copy working file to responses_path? 
+        # Or just tell processor to load from working file.
+        # Let's try to load from working file if exists, otherwise original.
+        
+        input_responses_path = responses_path
+        input_codes_path = codes_path
+        
+        if os.path.exists(current_progress_responses):
+            input_responses_path = current_progress_responses
+        if os.path.exists(current_progress_codes):
+            input_codes_path = current_progress_codes
+            
+        session_manager.update_session_status(session_id, 'processing')
+        await ws_manager.emit_status(session_id, 'processing', 'Reanudando procesamiento...' if is_resume else 'Iniciando procesamiento...')
+
+        processor = SurveyProcessor(session_id)
+        
+        # Callbacks
+        progress_cb, status_cb = SurveyProcessor.create_websocket_callbacks(ws_manager, session_id)
+        processor.set_progress_callback(progress_cb)
+        processor.set_status_callback(status_cb)
+        
+        # 1. LOAD
+        loop = asyncio.get_running_loop()
+        responses_df, codes_df = await loop.run_in_executor(
+            None, processor.load_files, input_responses_path, input_codes_path
+        )
+        
+        # Define Save Callback
+        def save_intermediate(r_df, c_df):
+            # Save to working files
+            processor.save_results(r_df, c_df, current_progress_responses, current_progress_codes)
+            # Also save to the "final" paths so they are available for download immediately
+            # But the final paths usually have a timestamp. 
+            # We can update the session results to point to these "latest" files.
+            
+            # Let's assume we update the result paths dynamically
+            # But simpler: Overwrite a "latest.xlsx"
+            latest_responses = os.path.join(session_dir, "responses_latest.xlsx")
+            latest_codes = os.path.join(session_dir, "codes_latest.xlsx")
+            processor.save_results(r_df, c_df, latest_responses, latest_codes)
+            
+            # Update session results so download endpoints work
+            res = session_manager.get_session(session_id).get('results', {})
+            res['output_responses'] = latest_responses
+            res['output_codes'] = latest_codes
+            session_manager.update_session_results(session_id, res)
+            
+        # 2. CODING PHASE
+        await ws_manager.emit_status(session_id, 'processing', 'Codificando respuestas...')
+        
+        processed_responses_df, updated_codes_df = await loop.run_in_executor(
+            None, processor.process, responses_df, codes_df, config, save_intermediate
+        )
+        
+        # Save Final Coding Result
+        final_responses_path = os.path.join(session_dir, f"responses_coded_final_{timestamp}.xlsx")
+        final_codes_path = os.path.join(session_dir, f"codes_coded_final_{timestamp}.xlsx")
+        
+        processor.save_results(processed_responses_df, updated_codes_df, final_responses_path, final_codes_path)
+        
+        # Update results
+        current_results = {
+            'output_responses': final_responses_path,
+            'output_codes': final_codes_path,
+            'processed_columns': len(config.get('columns', [])),
+            'total_records': len(processed_responses_df)
+        }
+        session_manager.update_session_results(session_id, current_results)
+        
+        # Emit CODING COMPLETED event (New requirement)
+        await ws_manager.emit_status(session_id, 'coding_completed', 'Codificación inicial finalizada.')
+        
+        # Stop here - Review is now optional and triggered separately
+        session_manager.update_session_status(session_id, 'completed')
+        
+        # We emit complete here so frontend knows coding is done
+        await ws_manager.emit_complete(session_id, current_results)
         
         # Remove from active tasks
         if session_id in active_tasks:
@@ -337,9 +450,7 @@ async def process_survey_task(session_id: str, config: Dict[str, Any]):
         print(f"Error in process_survey_task: {e}")
         session_manager.update_session_status(session_id, 'error')
         await ws_manager.emit_error(session_id, str(e))
-        
-        if session_id in active_tasks:
-            del active_tasks[session_id]
+
 
 
 @router.post("/process", response_model=ProcessResponse)
