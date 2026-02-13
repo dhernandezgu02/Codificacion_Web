@@ -2,22 +2,29 @@
 Reviewer Logic - Adapted from reviewer-comparator/reviewer-comparator.py
 """
 import pandas as pd
-import openai
 import os
 import sys
 from typing import List, Dict, Any, Callable, Optional, Tuple
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
+from openai import OpenAI
 
-# Import API key from config (assuming it's available in the environment or config.py)
-# In the original file it imported from config.py. We'll reuse the client from logic.py logic 
-# or instantiate a new one. Since logic.py already has the client, we can pass it or re-import.
-# For simplicity, we'll re-import the key from config.
+# Safe import for config
+current_file = os.path.abspath(__file__)
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-from config import openai_api_key_Codifiacion
-
-openai.api_key = openai_api_key_Codifiacion
+try:
+    from config import openai_api_key_Codifiacion
+except ImportError:
+    # Try alternative import if running from backend root
+    try:
+        sys.path.append(os.path.join(project_root, 'backend'))
+        from config import openai_api_key_Codifiacion
+    except ImportError:
+        print("Warning: Could not import config in reviewer.py")
+        openai_api_key_Codifiacion = None
 
 def clean_codes(codes):
     if pd.isna(codes):
@@ -48,7 +55,7 @@ def verify_codes_with_openai(question_text, response_text, assigned_codes, valid
     # The project requirements.txt says openai>=1.55.0, so we must use the new client syntax.
     # The original script used `openai.ChatCompletion.create` which is old syntax, but we should use the new `client.chat.completions.create`.
     
-    from openai import OpenAI
+    # from openai import OpenAI
     client = OpenAI(api_key=openai_api_key_Codifiacion)
     
     response = client.chat.completions.create(
