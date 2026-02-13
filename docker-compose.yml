@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      - SESSION_TIMEOUT_HOURS=24
+      - MAX_FILE_SIZE_MB=50
+      - CORS_ORIGINS=*
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5170:80"
+    restart: unless-stopped
+    depends_on:
+      - backend
