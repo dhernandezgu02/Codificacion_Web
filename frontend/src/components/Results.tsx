@@ -39,7 +39,8 @@ const Results: React.FC<ResultsProps> = ({ sessionId, results, onReset, onStartR
     try {
         setCleaningUp(true);
         // Call cleanup endpoint
-        await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/cleanup/${sessionId}`, {
+        const apiUrl = (import.meta as any).env.VITE_API_URL || 'http://localhost:8000';
+        await fetch(`${apiUrl}/api/cleanup/${sessionId}`, {
             method: 'DELETE'
         });
         onReset();
