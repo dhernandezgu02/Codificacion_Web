@@ -131,8 +131,15 @@ async def debug_endpoint():
             debug_info['openai_key_error'] = "Key is empty/None"
             
     except ImportError as e:
-        debug_info['config_import_error'] = str(e)
-        debug_info['sys_path'] = sys.path
+        try:
+            from backend import config
+            from backend.config import openai_api_key_Codifiacion, gemini_api_key
+            debug_info['config_loaded'] = True
+            debug_info['loaded_from'] = 'backend.config'
+        except ImportError as e2:
+            debug_info['config_import_error'] = str(e)
+            debug_info['backend_config_import_error'] = str(e2)
+            debug_info['sys_path'] = sys.path
 
     # Check temp dir
     debug_info['temp_dir'] = TEMP_DIR

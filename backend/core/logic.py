@@ -11,23 +11,16 @@ from typing import Callable, Optional, Tuple, Set, Dict, List, Any
 import sys
 from pathlib import Path
 
-# Add project root to sys.path in a robust way
-# This handles cases where the script is run from different directories
-current_file = Path(__file__).resolve()
-project_root = current_file.parent.parent.parent
-if str(project_root) not in sys.path:
-    sys.path.append(str(project_root))
-
 try:
+    import config
     from config import openai_api_key_Codifiacion
 except ImportError:
-    # Try alternative import if running from backend root
     try:
-        sys.path.append(str(project_root / 'backend'))
-        from config import openai_api_key_Codifiacion
+        from backend import config
+        from backend.config import openai_api_key_Codifiacion
     except ImportError:
-        print("Warning: Could not import config in logic.py")
-        openai_api_key_Codifiacion = None
+         print("Warning: Could not import config")
+         openai_api_key_Codifiacion = None
 
 # Configure OpenAI API
 client = OpenAI(api_key=openai_api_key_Codifiacion)

@@ -9,22 +9,17 @@ from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 from openai import OpenAI
 
-# Safe import for config
-current_file = os.path.abspath(__file__)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
-if project_root not in sys.path:
-    sys.path.append(project_root)
-
 try:
+    import config
     from config import openai_api_key_Codifiacion
 except ImportError:
-    # Try alternative import if running from backend root
+    # Try local import if running directly
     try:
-        sys.path.append(os.path.join(project_root, 'backend'))
-        from config import openai_api_key_Codifiacion
+        from backend import config
+        from backend.config import openai_api_key_Codifiacion
     except ImportError:
-        print("Warning: Could not import config in reviewer.py")
-        openai_api_key_Codifiacion = None
+         print("Warning: Could not import config")
+         openai_api_key_Codifiacion = None
 
 def clean_codes(codes):
     if pd.isna(codes):

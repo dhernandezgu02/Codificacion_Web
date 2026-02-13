@@ -5,21 +5,15 @@ from google import genai
 from google.genai import types
 from pathlib import Path
 
-# Add project root to sys.path in a robust way
-current_file = Path(__file__).resolve()
-project_root = current_file.parent.parent.parent
-if str(project_root) not in sys.path:
-    sys.path.append(str(project_root))
-
 try:
+    import config
     from config import gemini_api_key
 except ImportError:
-    # Try alternative import
     try:
-        sys.path.append(str(project_root / 'backend'))
-        from config import gemini_api_key
+        from backend import config
+        from backend.config import gemini_api_key
     except ImportError:
-        print("Warning: Could not import config in gemini_client.py")
+        print("Warning: Could not import config")
         gemini_api_key = None
 
 # Model Selection
