@@ -8,11 +8,26 @@ import re
 import time
 from openai import OpenAI
 from typing import Callable, Optional, Tuple, Set, Dict, List, Any
-
-# Import API key from config
 import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-from config import openai_api_key_Codifiacion
+from pathlib import Path
+
+# Add project root to sys.path in a robust way
+# This handles cases where the script is run from different directories
+current_file = Path(__file__).resolve()
+project_root = current_file.parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
+
+try:
+    from config import openai_api_key_Codifiacion
+except ImportError:
+    # Try alternative import if running from backend root
+    try:
+        sys.path.append(str(project_root / 'backend'))
+        from config import openai_api_key_Codifiacion
+    except ImportError:
+        print("Warning: Could not import config in logic.py")
+        openai_api_key_Codifiacion = None
 
 # Configure OpenAI API
 client = OpenAI(api_key=openai_api_key_Codifiacion)
@@ -25,10 +40,17 @@ questions_dict: Dict[str, Set[Tuple[str, str]]] = {}
 
 def load_files(responses_path: str, codes_path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Load Excel files for responses and codes"""
-    responses_df = pd.read_excel(responses_path)
-    codes_df = pd.read_excel(codes_path, sheet_name='Codificación')
-    codes_df.columns = codes_df.columns.str.strip()
-    return responses_df, codes_df
+    try:
+        responses_df = pd.read_excel(responses_path)
+        codes_df = pd.read_excel(codes_path, sheet_name='Codificación')
+        codes_df.columns = codes_df.columns.str.strip()
+        return responses_df, codes_df
+    except ImportError as e:
+        if "openpyxl" in str(e):
+             raise ImportError("Missing required library: openpyxl. Please install it on the server.")
+        raise e
+    except Exception as e:
+        raise Exception(f"Error loading files: {str(e)}")
 
 
 def select_columns(codes_df: pd.DataFrame, question_column: str) -> pd.DataFrame:
@@ -43,6 +65,10 @@ def request_openai(messages: List[Dict[str, str]], max_retries: int = 5,
     """Make request to OpenAI API with retry logic"""
     global PROCESS_STOPPED
     
+    if not openai_api_key_Codifiacion:
+        print("Error: OpenAI API Key not found")
+        return None
+
     for attempt in range(max_retries):
         if PROCESS_STOPPED or (stop_requested_check and stop_requested_check()):
             print("Solicitud a OpenAI cancelada - proceso detenido")
@@ -57,8 +83,10 @@ def request_openai(messages: List[Dict[str, str]], max_retries: int = 5,
             
             print(f"\n[OpenAI Logic] Solicitud exitosa (Intento {attempt + 1})")
             print("="*50)
-            print(f"[OpenAI Logic] Response Object: {response}")
-            print(f"[OpenAI Logic] Content: {response.choices[0].message.content}")
+            try:
+                print(f"[OpenAI Logic] Content: {response.choices[0].message.content}")
+            except:
+                pass
             print("="*50)
             
             return response
@@ -72,12 +100,16 @@ def request_openai(messages: List[Dict[str, str]], max_retries: int = 5,
             if attempt < max_retries - 1:
                 time.sleep(10)
             else:
-                raise
+                # Don't raise, return None to handle gracefully
+                print(f"OpenAI request failed after {max_retries} retries")
+                return None
 
 
 def normalize_text(text: str) -> str:
     """Normalize text for comparison"""
-    text = text.lower()
+    if pd.isna(text):
+        return ""
+    text = str(text).lower()
     text = re.sub(r'[^\w\s]', '', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
@@ -98,7 +130,7 @@ def filter_exclusive_codes(assigned_codes_list: List[str]) -> List[str]:
 
 def get_next_valid_code(existing_codes: pd.Series) -> str:
     """Get next valid code, excluding reserved codes"""
-    valid_codes = [int(code) for code in existing_codes if int(code) not in {66, 77, 88, 99, 777, 888, 999}]
+    valid_codes = [int(code) for code in existing_codes if str(code).isdigit() and int(code) not in {66, 77, 88, 99, 777, 888, 999}]
     next_code = max(valid_codes, default=0) + 1
     while next_code in {66, 77, 88, 99, 777, 888, 999}:
         next_code += 1
@@ -160,15 +192,20 @@ def create_new_labels(question: str, response: str, available_labels: List[str],
     """Create new label for a response using AI"""
     response_str = str(response).strip().lower()
 
-    all_existing_labels = list(available_labels) + list(codes_df.loc[codes_df['Nombre de la Pregunta'] == question, 'Label'].str.lower())
+    all_existing_labels = list(available_labels) + list(codes_df.loc[codes_df['Nombre de la Pregunta'] == question, 'Label'].astype(str).str.lower())
     normalized_labels = [normalize_text(label) for label in all_existing_labels]
 
     normalized_response = normalize_text(response_str)
     if normalized_response in normalized_labels:
-        index_in_labels = normalized_labels.index(normalized_response)
-        if index_in_labels < len(available_labels):
-            print(f"Etiqueta existente encontrada para '{response_str}', reutilizando la etiqueta.")
-            return available_labels[index_in_labels]
+        # Try to find which label it matched to reuse it directly?
+        # Logic kept as original: if match found, reuse one from available_labels if possible
+        try:
+            index_in_labels = normalized_labels.index(normalized_response)
+            if index_in_labels < len(available_labels):
+                print(f"Etiqueta existente encontrada para '{response_str}', reutilizando la etiqueta.")
+                return available_labels[index_in_labels]
+        except ValueError:
+            pass
     
     messages = [
         {"role": "system", "content": """You are an expert in coding survey responses.
@@ -264,14 +301,14 @@ def process_response(question: str, response: str, available_labels: List[str],
     excluded_codes = {'66', '77', '88', '99', '777', '888', '999'}
     filtered_labels_codes = [
         (label, code) for label, code in zip(available_labels, available_codes)
-        if code not in excluded_codes
+        if str(code) not in excluded_codes
     ]
     filtered_labels, filtered_codes = zip(*filtered_labels_codes) if filtered_labels_codes else ([], [])
 
     # print(f"[Processing response for question '{question}']")
 
     assigned_codes = assign_labels_to_response(
-        question, response_str, filtered_labels, filtered_codes, 
+        question, response_str, list(filtered_labels), list(filtered_codes), 
         is_single_response, stop_requested_check,
         max_labels=max_labels, context=context
     )
@@ -286,13 +323,12 @@ def process_response(question: str, response: str, available_labels: List[str],
             assigned_codes = "77"
         else:
             new_label = create_new_labels(
-                question, response_str, filtered_labels, filtered_codes, 
+                question, response_str, list(filtered_labels), list(filtered_codes), 
                 codes_df, stop_requested_check
             )
             
             if new_label:
                 # Verificar si la etiqueta ya existe en codes_df para esta pregunta (evitar duplicados)
-                # Esto previene que se cree un nuevo código (ej: 11) si ya existe uno (ej: 10) para la misma etiqueta
                 existing_entry = codes_df.loc[
                     (codes_df['Nombre de la Pregunta'] == question) & 
                     (codes_df['Label'].astype(str).str.lower() == new_label.lower()), 
@@ -316,9 +352,11 @@ def process_response(question: str, response: str, available_labels: List[str],
                     if label_created:
                         print(f"Nueva etiqueta creada: '{new_label}' con código {new_code}")
 
-                        available_codes.append(new_code)
-                        available_labels.append(new_label)
-
+                        # Update available lists for subsequent calls within this process
+                        # Note: This updates the lists in the caller's scope if they are mutable, 
+                        # but tuples are immutable. process_response receives lists though.
+                        # However, we passed converted lists from tuples.
+                        
                         limit_labels['count'] += 1
                         limit_77['new_labels'].append((question, new_label, new_code))
 
@@ -359,21 +397,22 @@ def group_labels_codes(selected_questions: pd.DataFrame, response_columns: List[
         if pd.isna(row['Id campo']):
             continue
         
-        id_campos = [campo.strip() for campo in row['Id campo'].split('-')]
+        id_campos = [campo.strip() for campo in str(row['Id campo']).split('-')]
         
         for col in response_columns:
             col_base = col[:-5] if col.endswith('_OTRO') or col.endswith('_OTRA') else f"C{col}"
             if any(col_base == id_campo for id_campo in id_campos):
-                questions = row['Nombre de la Pregunta'].split(' / ')
+                questions = str(row['Nombre de la Pregunta']).split(' / ')
                 labels = str(row['Label']).split(',')
                 codes = str(row['Cod']).split(',') if not pd.isna(row['Cod']) else []
 
                 for question in questions:
                     if question not in questions_dict:
                         questions_dict[question] = set()
-                    questions_dict[question].update(zip(codes, labels))
-    
-    # print(f"questions_dict {questions_dict}")
+                    # Safe zip
+                    safe_len = min(len(codes), len(labels))
+                    if safe_len > 0:
+                        questions_dict[question].update(zip(codes[:safe_len], labels[:safe_len]))
     
     return questions_dict
 
@@ -397,11 +436,15 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
     
     selected_questions = select_columns(codes_df, question_column)
     questions_dict = group_labels_codes(selected_questions, response_columns)
-    new_labels = []
-
+    
     updated_codes_df = codes_df.copy()
     
-    total_records = sum(len(responses_df[col].dropna().unique()) for col in response_columns)
+    # Calculate total records safely
+    total_records = 0
+    for col in response_columns:
+        if col in responses_df.columns:
+            total_records += len(responses_df[col].dropna().unique())
+            
     processed_records = 0
 
     def check_stop():
@@ -413,8 +456,8 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
         if pd.isna(row['Id campo']):
             continue
         
-        id_campos = [campo.strip() for campo in row['Id campo'].split('-')]
-        questions = row['Nombre de la Pregunta'].split(' / ')
+        id_campos = [campo.strip() for campo in str(row['Id campo']).split('-')]
+        questions = str(row['Nombre de la Pregunta']).split(' / ')
         
         for col in response_columns:
             col_base = col[:-5] if col.endswith('_OTRO') or col.endswith('_OTRA') else f"C{col}"
@@ -456,6 +499,10 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
                 lambda x: ';'.join([f"{int(cod):02}" for cod in str(x).split(';') if cod.strip().isdigit()]) if pd.notna(x) else ""
             )
 
+            if col not in responses_df.columns:
+                print(f"Columna {col} no encontrada en respuestas. Saltando.")
+                continue
+
             unique_responses = responses_df[col].dropna().unique()
             for j, response in enumerate(unique_responses):
                 if PROCESS_STOPPED:
@@ -465,18 +512,9 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
                     status_callback(f"Procesando {col}: {j+1}/{len(unique_responses)}")
                 
                 # Check if this cell was already manually coded/processed
-                # Note: This logic processes by unique response, so we need to be careful.
-                # If unique response is "XYZ" and it was manually coded in apply_manual_coding,
-                # then responses_df should already have the code in 'C{col}'.
-                
-                # We need to check if ALL instances of this response already have a code.
-                # Since we update the dataframe in-place in process_response, 
-                # we can check if the first instance of this response has a code.
                 mask = responses_df[col] == response
                 existing_codes_for_response = responses_df.loc[mask, code_column].unique()
                 
-                # If we have a valid code already (and it's not empty), skip AI processing
-                # Assuming empty is "" or nan
                 has_code = False
                 for ec in existing_codes_for_response:
                     if pd.notna(ec) and str(ec).strip() != "":
@@ -484,9 +522,8 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
                         break
                 
                 if has_code:
-                    # Already coded (likely by manual process), just update progress and continue
                     processed_records += 1
-                    if progress_callback:
+                    if progress_callback and total_records > 0:
                         progress_callback(processed_records / total_records)
                     continue
 
@@ -495,47 +532,30 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
                         continue
                         
                     data = questions_dict[question]
-                    available_codes, available_labels = zip(*data)
-                    available_labels = list(available_labels)
-                    available_codes = list(available_codes)
+                    # Data is set of tuples (code, label)
+                    available_codes = [x[0] for x in data]
+                    available_labels = [x[1] for x in data]
                     
                     # Get specific config for this column
                     col_config = config_map.get(col, {})
                     max_labels = col_config.get('maxLabels', 6)
                     context = col_config.get('context', "")
                     
-                    # New: Get per-column max new labels limit
-                    # Default to 8 if not specified (legacy behavior), but frontend now sets it
-                    # If 0, it means NO new labels allowed
                     col_max_new_labels = col_config.get('maxNewLabels', 8)
                     if col_max_new_labels is None: 
-                        col_max_new_labels = 8 # Fallback
+                        col_max_new_labels = 8
                     
-                    # Create a specific limit object for this column processing
-                    # We reuse 'limit_labels' structure but with column-specific max
-                    # NOTE: 'count' here should track NEW labels created for THIS column.
-                    # Since process_response increments the counter passed to it, we need a 
-                    # way to persist this counter PER COLUMN across loop iterations.
-                    # We can use a dictionary keyed by column name in the outer scope.
-                    
-                    # Initialize counter for this column if not exists
                     if 'col_counters' not in limit_labels:
                         limit_labels['col_counters'] = {}
                     
                     if col not in limit_labels['col_counters']:
                         limit_labels['col_counters'][col] = 0
                         
-                    # Create a proxy limit object that process_response can update
-                    # This is tricky because process_response expects a dict with 'count' and 'max'
-                    # and increments 'count'. 
-                    # We construct it on the fly.
-                    
                     current_col_limit = {
                         'count': limit_labels['col_counters'][col],
                         'max': col_max_new_labels
                     }
                     
-                    # If multi-label is false, force max_labels to 1
                     if not col_config.get('multiLabel', False):
                         max_labels = 1
 
@@ -545,7 +565,6 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
                         max_labels=max_labels, context=context
                     )
                     
-                    # Update the persistent counter with the new value
                     limit_labels['col_counters'][col] = current_col_limit['count']
 
                     responses_df.loc[mask, code_column] = assigned_codes
@@ -555,14 +574,14 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
                         MODIFIED_CELLS.add((idx, code_column))
                     
                     processed_records += 1
-                    if progress_callback:
+                    if progress_callback and total_records > 0:
                         progress_callback(processed_records / total_records)
                     
                     break
                     
         # Save progress after processing each column
         if save_callback:
-             print(f"Guardando progreso intermedio después de la columna {col}")
+             # print(f"Guardando progreso intermedio después de la columna {col}")
              save_callback(responses_df, updated_codes_df)
 
     return responses_df, updated_codes_df
@@ -596,16 +615,25 @@ def process_other_columns(responses_df: pd.DataFrame, response_columns: List[str
                 lambda x: ';'.join([f"{int(code):02d}" for code in str(x).split(';') if code.strip().isdigit()])
             )
             
+            if col not in responses_df.columns:
+                continue
+
             other_responses = responses_df[col]
             for idx, response in other_responses.items():
                 if pd.isna(response):
                     continue
 
                 for question, data in questions_dict.items():
-                    if isinstance(data, set) and all(isinstance(item, tuple) and len(item) == 2 for item in data):
-                        available_labels, available_codes = zip(*data)
-                        available_labels = list(available_labels)
-                        available_codes = list(available_codes)
+                    # Validate data format
+                    valid_data = True
+                    for item in data:
+                        if not (isinstance(item, tuple) and len(item) == 2):
+                            valid_data = False
+                            break
+                    
+                    if valid_data and data:
+                        available_codes = [x[0] for x in data]
+                        available_labels = [x[1] for x in data]
                     else:
                         continue
 
@@ -621,8 +649,9 @@ def process_other_columns(responses_df: pd.DataFrame, response_columns: List[str
                     current_codes_set = set(current_codes.split(';')) if current_codes else set()
                     new_codes_set = set(str(assigned_codes).split(';')) if assigned_codes else set()
 
-                    new_codes_set = {f"{int(code):02d}" for code in new_codes_set}
-                    current_codes_set = {f"{int(code):02d}" for code in current_codes_set}
+                    # Clean codes
+                    new_codes_set = {f"{int(code):02d}" for code in new_codes_set if str(code).isdigit()}
+                    current_codes_set = {f"{int(code):02d}" for code in current_codes_set if str(code).isdigit()}
 
                     combined_codes_set = current_codes_set | new_codes_set
                     non_excluded_codes = combined_codes_set - excluded_codes
@@ -649,13 +678,13 @@ def process_other_columns(responses_df: pd.DataFrame, response_columns: List[str
                     MODIFIED_CELLS.add((idx, col_without_other))
 
                     processed_records += 1
-                    if progress_callback:
+                    if progress_callback and total_records > 0:
                         progress_callback(processed_records / total_records)
                     if status_callback:
                         status_callback(f"Procesando registro {processed_records} de {total_records}")
 
     print(f"Nuevas etiquetas creadas: {new_labels}")
-    print(f"update_codes_df antes del return en otros: {update_codes_df}")
+    # print(f"update_codes_df antes del return en otros: {update_codes_df}")
 
     return responses_df, update_codes_df
 
@@ -666,31 +695,28 @@ def update_codes_file(codes_df: pd.DataFrame, new_labels: List[Tuple]) -> pd.Dat
 
     for id_campo, label, _ in new_labels:
         clean_label = re.sub(r'\(\d{3}\)', '', label).strip()
-        # print(f"clean_label: {clean_label}")
-
+        
         codes_df['Id campo'] = codes_df['Id campo'].astype(str).str.strip().str.upper()
         id_campo_normalized = str(id_campo).strip().upper()
-        # print(f"id_campo_normalized: {id_campo_normalized}")
-
+        
         question_rows = codes_df.loc[codes_df['Id campo'] == id_campo_normalized]
-        # print(f"question_rows: {question_rows}")
-
+        
         if question_rows.empty:
             print(f"Warning: Question with Id campo '{id_campo}' not found in DataFrame. Skipping update.")
             continue
 
-        existing_codes_question = question_rows['Cod'].astype(int)
-        # print(f"existing_codes_question: {existing_codes_question}")
+        existing_codes_question = []
+        try:
+             existing_codes_question = question_rows['Cod'].dropna().astype(int).tolist()
+        except:
+             pass
 
         valid_codes = [cod for cod in existing_codes_question if cod not in excluded_codes]
-        # print(f"valid_codes: {valid_codes}")
-
+        
         new_code = max(valid_codes, default=0) + 1
-        # print(f"new_code: {new_code}")
-
+        
         form_question = question_rows['# Pregunta del formulario'].ffill().bfill().values[0]
-        # print(f"form_question: {form_question}")
-
+        
         new_row = pd.DataFrame({
             'Id campo': [id_campo],
             'Cod': [f"{new_code:02}"],
@@ -699,11 +725,9 @@ def update_codes_file(codes_df: pd.DataFrame, new_labels: List[Tuple]) -> pd.Dat
             '# Pregunta del formulario': [form_question], 
             'Nombre de la Pregunta': [None]
         })
-        # print(f"new_row: {new_row}")
-
+        
         codes_df = pd.concat([codes_df, new_row], ignore_index=True)
-        # print(f"Updated codes_df: {codes_df.tail()}")
-
+        
     return codes_df
 
 
@@ -718,10 +742,6 @@ def update_used_columns(original_responses_df: pd.DataFrame, modified_responses_
             
             original_responses_df[code_column] = modified_responses_df[code_column]
             
-            # print(f"Verificando columna {code_column}...")
-            # print(f"Registros vacíos encontrados: {original_responses_df[code_column].isna().sum()}")
-            # print(f"Registros con string vacío: {(original_responses_df[code_column].astype(str) == '').sum()}")
-    
     original_responses_df.to_excel(save_path, index=False)
     print(f"Updated file saved at {save_path}")
 
@@ -743,10 +763,6 @@ def get_frequent_responses(responses_df: pd.DataFrame, columns: List[str], top_n
     """
     Analyze frequent responses for selected columns.
     Groups similar responses (fuzzy match >= 80%).
-    
-    Returns:
-        Dict where keys are column names and values are lists of dicts:
-        {'text': str, 'count': int, 'variations': List[str]}
     """
     from rapidfuzz import process, fuzz
     
@@ -756,11 +772,9 @@ def get_frequent_responses(responses_df: pd.DataFrame, columns: List[str], top_n
         if col not in responses_df.columns:
             continue
             
-        # 1. Get value counts of normalized text
-        # We assume normalize_text is available in logic.py
         raw_values = responses_df[col].dropna().astype(str).tolist()
         normalized_counts = {}
-        original_map = {} # norm -> list of originals
+        original_map = {} 
         
         for val in raw_values:
             norm = normalize_text(val)
@@ -771,11 +785,9 @@ def get_frequent_responses(responses_df: pd.DataFrame, columns: List[str], top_n
                 original_map[norm] = set()
             original_map[norm].add(val)
             
-        # Convert to list of dicts for sorting
         candidates = [{"text": norm, "count": count} for norm, count in normalized_counts.items()]
         candidates.sort(key=lambda x: x['count'], reverse=True)
         
-        # 2. Group by similarity
         grouped_results = []
         processed_texts = set()
         
@@ -787,16 +799,11 @@ def get_frequent_responses(responses_df: pd.DataFrame, columns: List[str], top_n
             processed_texts.add(text)
             
             group = {
-                "text": text, # The representative text (most frequent)
+                "text": text,
                 "count": item['count'],
                 "variations": list(original_map[text])
             }
             
-            # Look for similar items in the remaining candidates
-            # We iterate through the rest to find matches
-            # Ideally we only check against "unprocessed" items, but for simplicity/speed with rapidfuzz:
-            
-            # Let's extract remaining texts to compare against
             remaining_candidates = [c for c in candidates if c['text'] not in processed_texts]
             if not remaining_candidates:
                 grouped_results.append(group)
@@ -804,22 +811,16 @@ def get_frequent_responses(responses_df: pd.DataFrame, columns: List[str], top_n
                 
             remaining_texts = [c['text'] for c in remaining_candidates]
             
-            # Find matches > threshold
             matches = process.extract(text, remaining_texts, scorer=fuzz.ratio, limit=None, score_cutoff=similarity_threshold)
             
             for match_text, score, index in matches:
-                # rapidfuzz returns (match, score, index)
                 processed_texts.add(match_text)
                 
-                # Add count to the main group
                 match_candidate = next(c for c in remaining_candidates if c['text'] == match_text)
                 group['count'] += match_candidate['count']
                 group['variations'].extend(list(original_map[match_text]))
             
-            # Pick the most frequent original variation as the display text (optional, but nicer)
-            # For now, we keep the normalized representative or pick the first variation
             if group['variations']:
-                 # Find most frequent original string? Too expensive maybe. Just pick shortest/first.
                  group['display_text'] = sorted(list(group['variations']), key=len)[0]
             else:
                  group['display_text'] = text
@@ -829,10 +830,8 @@ def get_frequent_responses(responses_df: pd.DataFrame, columns: List[str], top_n
             if len(grouped_results) >= top_n:
                 break
         
-        # Sort grouped results by total count descending
         grouped_results.sort(key=lambda x: x['count'], reverse=True)
         
-        # Filter groups with less than 10 mentions (User requirement)
         grouped_results = [g for g in grouped_results if g['count'] >= 10]
         
         result[col] = grouped_results
@@ -844,16 +843,7 @@ def apply_manual_coding(responses_df: pd.DataFrame, manual_mappings: Dict[str, D
                        similarity_threshold: float = 80.0) -> Tuple[pd.DataFrame, Set[Tuple[int, str]]]:
     """
     Apply manual codes to the dataframe before AI processing.
-    
-    Args:
-        responses_df: DataFrame to process
-        manual_mappings: Dict {column_name: {text_to_match: code_to_assign}}
-        similarity_threshold: Fuzzy match threshold (0-100)
-        
-    Returns:
-        Tuple(processed_df, set_of_modified_cells)
     """
-    from rapidfuzz import process, fuzz
     
     modified_cells = set()
     
@@ -867,13 +857,9 @@ def apply_manual_coding(responses_df: pd.DataFrame, manual_mappings: Dict[str, D
         if code_column not in responses_df.columns:
             responses_df[code_column] = ""
             
-        # Normalize keys in mapping for consistent comparison
         normalized_map = {normalize_text(k): v for k, v in mappings.items()}
-        map_keys = list(normalized_map.keys())
         
-        # Iterate rows
         for idx in responses_df.index:
-            # Skip if already coded (though usually this runs first)
             current_code = str(responses_df.at[idx, code_column]).strip()
             if current_code and current_code != "nan":
                 continue
@@ -888,22 +874,10 @@ def apply_manual_coding(responses_df: pd.DataFrame, manual_mappings: Dict[str, D
                 
             assigned_code = None
             
-            # 1. Exact Match (Normalized)
             if norm_val in normalized_map:
                 assigned_code = normalized_map[norm_val]
-            # else:
-            #     # 2. Fuzzy Match (Disabled to respect manual discard/selection)
-            #     # Since the frontend sends ALL validated variations as keys, exact match is sufficient.
-            #     # This prevents "discarded" variations from being accidentally matched via fuzzy logic.
-            #     if map_keys:
-            #         match = process.extractOne(norm_val, map_keys, scorer=fuzz.ratio, score_cutoff=similarity_threshold)
-            #         if match:
-            #             match_text, score, index = match
-            #             assigned_code = normalized_map[match_text]
             
             if assigned_code:
-                # Assign code
-                # Format to 2 digits just in case
                 try:
                     formatted_code = f"{int(assigned_code):02d}"
                 except:

@@ -3,10 +3,24 @@ import sys
 import time
 from google import genai
 from google.genai import types
+from pathlib import Path
 
-# Import API key from config
-sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-from config import gemini_api_key
+# Add project root to sys.path in a robust way
+current_file = Path(__file__).resolve()
+project_root = current_file.parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
+
+try:
+    from config import gemini_api_key
+except ImportError:
+    # Try alternative import
+    try:
+        sys.path.append(str(project_root / 'backend'))
+        from config import gemini_api_key
+    except ImportError:
+        print("Warning: Could not import config in gemini_client.py")
+        gemini_api_key = None
 
 # Model Selection
 # User requested "Gemini 3 Flash". 
@@ -18,6 +32,10 @@ _client_instance = None
 def get_client(reset=False):
     global _client_instance
     if _client_instance is None or reset:
+        if not gemini_api_key:
+            print("[Gemini] Error: API Key no configurada.")
+            return None
+            
         print("[Gemini] Inicializando cliente de Google GenAI...")
         # Configurar timeout explícito de 120 segundos para evitar bloqueos
         _client_instance = genai.Client(api_key=gemini_api_key, http_options={'timeout': 120})
@@ -27,6 +45,10 @@ def request_gemini(messages, temperature=0.0, max_retries=3):
     """
     Make a request to Gemini API with robust error handling and retries.
     """
+    if not gemini_api_key:
+        print("[Gemini] No API Key found.")
+        return None
+
     system_instruction = None
     user_prompt = ""
     
@@ -39,9 +61,11 @@ def request_gemini(messages, temperature=0.0, max_retries=3):
     for attempt in range(max_retries):
         try:
             # Reutilizar cliente, resetear solo si es un reintento (fallo previo)
-            # Esto evita crear miles de conexiones/clientes en bucles rápidos
             should_reset = (attempt > 0)
             client = get_client(reset=should_reset)
+            
+            if not client:
+                return None
             
             print(f"[Gemini] Intentando conectar con Google API (Intento {attempt+1})...")
 
@@ -56,16 +80,7 @@ def request_gemini(messages, temperature=0.0, max_retries=3):
             
             # DEBUG: Print full response
             print(f"\n[Gemini] Solicitud exitosa (Intento {attempt+1})")
-            print("="*50)
-            print("[Gemini] RAW RESPONSE OBJECT:")
-            print(response)
-            try:
-                # Attempt to print JSON structure if possible, for clarity
-                pass
-            except:
-                pass
-            print("="*50)
-
+            
             if hasattr(response, 'text') and response.text:
                 return response.text
             else:

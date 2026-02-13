@@ -3,11 +3,18 @@ Main FastAPI Application
 Survey Coding with AI - Backend Server
 """
 import os
+import sys
+import asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 import socketio
 from dotenv import load_dotenv
+
+# Ensure we can import from core and api
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
 
 from core.session import SessionManager
 from core.websocket import WebSocketManager
@@ -24,7 +31,10 @@ from api import routes
 load_dotenv()
 
 # Configuration
-TEMP_DIR = os.getenv('TEMP_DIR', 'temp_uploads')
+# Use absolute path for temp dir to avoid permission issues
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMP_DIR = os.getenv('TEMP_DIR', os.path.join(BASE_DIR, 'temp_uploads'))
+
 SESSION_TIMEOUT_HOURS = int(os.getenv('SESSION_TIMEOUT_HOURS', '24'))
 MAX_FILE_SIZE_MB = int(os.getenv('MAX_FILE_SIZE_MB', '50'))
 CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:5173,http://localhost:3000').split(',')
@@ -87,6 +97,70 @@ api_app.include_router(routes.router)
 async def test_endpoint():
     return {"status": "ok", "message": "API is working"}
 
+@api_app.get("/api/debug")
+async def debug_endpoint():
+    """Debug endpoint to check server environment"""
+    debug_info = {}
+    
+    # Check libraries
+    try:
+        import openpyxl
+        debug_info['openpyxl'] = openpyxl.__version__
+    except ImportError:
+        debug_info['openpyxl'] = "Not installed (Required for Excel)"
+        
+    try:
+        import pandas
+        debug_info['pandas'] = pandas.__version__
+    except ImportError:
+        debug_info['pandas'] = "Not installed"
+
+    # Check config and keys (safely)
+    try:
+        # Import dynamically to see if it works
+        import config
+        from config import openai_api_key_Codifiacion, gemini_api_key
+        
+        debug_info['config_loaded'] = True
+        debug_info['openai_key_present'] = bool(openai_api_key_Codifiacion)
+        debug_info['gemini_key_present'] = bool(gemini_api_key)
+        
+        if openai_api_key_Codifiacion:
+            debug_info['openai_key_prefix'] = openai_api_key_Codifiacion[:7] + "..."
+        else:
+            debug_info['openai_key_error'] = "Key is empty/None"
+            
+    except ImportError as e:
+        debug_info['config_import_error'] = str(e)
+        debug_info['sys_path'] = sys.path
+
+    # Check temp dir
+    debug_info['temp_dir'] = TEMP_DIR
+    debug_info['temp_dir_exists'] = os.path.exists(TEMP_DIR)
+    debug_info['temp_dir_writable'] = os.access(TEMP_DIR, os.W_OK) if os.path.exists(TEMP_DIR) else False
+    debug_info['cwd'] = os.getcwd()
+    
+    return debug_info
+
+async def run_periodic_cleanup():
+    """Run periodic cleanup every hour"""
+    while True:
+        try:
+            # Wait for 1 hour (3600 seconds)
+            await asyncio.sleep(3600)
+            
+            print("Running scheduled cleanup...")
+            count = session_manager.cleanup_old_sessions()
+            if count > 0:
+                print(f"Scheduled cleanup: removed {count} old sessions")
+                
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"Error in scheduled cleanup: {e}")
+            # Wait a bit before retrying to avoid spamming logs if persistent error
+            await asyncio.sleep(60)
+
 @api_app.on_event("startup")
 async def startup_event():
     """Run on application startup"""
@@ -100,9 +174,15 @@ async def startup_event():
     print("=" * 60)
     
     # Cleanup old sessions on startup
-    cleaned = session_manager.cleanup_old_sessions()
-    if cleaned > 0:
-        print(f"Cleaned up {cleaned} old sessions")
+    try:
+        cleaned = session_manager.cleanup_old_sessions()
+        if cleaned > 0:
+            print(f"Cleaned up {cleaned} old sessions")
+    except Exception as e:
+        print(f"Warning during startup cleanup: {e}")
+
+    # Start periodic cleanup task
+    asyncio.create_task(run_periodic_cleanup())
 
 
 # Serve static files from frontend build (for production)
