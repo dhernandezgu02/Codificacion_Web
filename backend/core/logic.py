@@ -870,6 +870,8 @@ def apply_manual_coding(responses_df: pd.DataFrame, manual_mappings: Dict[str, D
         code_column = f'C{col}'
         if code_column not in responses_df.columns:
             responses_df[code_column] = ""
+        # Asegurar dtype object para aceptar códigos como "99", "66" (Excel puede traer float64)
+        responses_df[code_column] = responses_df[code_column].astype(object)
             
         normalized_map = {normalize_text(k): v for k, v in mappings.items()}
         
