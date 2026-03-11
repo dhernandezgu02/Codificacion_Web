@@ -42,7 +42,9 @@ def verify_codes_with_openai(question_text, response_text, assigned_codes, valid
         "Lee muy bien la pregunta y la respuesta para asegurarte de que las asignaciones sean correctas. "
         "Si hay errores en los códigos asignados o faltan códigos necesarios, corrige la asignación en formato lista separada por ';'. "
         "Si la asignación es correcta, devuelve la misma lista sin cambios. "
-        "Si una idea en la respuesta puede corresponder a múltiples códigos, asigna solo 1 código por idea."
+        "Si una idea en la respuesta puede corresponder a múltiples códigos, asigna solo 1 código por idea. "
+        "MUY IMPORTANTE: Si la respuesta tiene múltiples códigos y uno de ellos es '77', revisa si los DEMÁS códigos asignados "
+        "ya capturan correctamente la idea de la respuesta. Si es así, ELIMINA el código '77' de tu respuesta. "
         "Recuerda que los códigos deben estar a dos dígitos y separados por punto y coma. "
     )
     
@@ -179,6 +181,12 @@ class SurveyReviewer:
                         processed_rows += 1
                         continue
                         
+                    # Solo revisar si tiene el código 77
+                    codes_list = [c.strip() for c in str(assigned_codes).split(';') if c.strip().isdigit()]
+                    if '77' not in codes_list:
+                        processed_rows += 1
+                        continue
+                    
                     corrected_codes = verify_codes_with_openai(question_text, response_text, assigned_codes, valid_codes, valid_labels)
                     
                     # Clean and format again

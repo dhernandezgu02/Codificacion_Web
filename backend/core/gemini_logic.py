@@ -113,8 +113,8 @@ def assign_labels_to_response(question: str, response: str, labels: List[str],
          ALWAYS check existing labels first and reuse them if they match conceptually and thematic match.
          Instructions:
          Si hay varios codigos repetidos o con ideas similares que se puedan usar en una respuesta solo usa uno no los uses todos en una respuesta, usa el que más se ajuste textualmente.
-         Si la respuesta no es coherente a la pregunta asigna 99
-         If no existing code fits the response, reply with 'NEW_LABEL_NEEDED' instead of assigning any code.
+         Si la respuesta no es coherente a la pregunta, o el encuestado indica que no sabe o no responde, asigna ÚNICAMENTE el código 99.
+         If no existing code fits the response, reply with 'NEW_LABEL_NEEDED' instead of assigning any code (Except for don't know / no response / incoherent responses, which should ALWAYS be 99).
          1. Assign only the codes that fit the response based on thematic or conceptual alignment.Not use codes 66, 77, 88, and 99.
          2. Only if in {labels_str} there are no labels or codes other than codes 66, 77, 88, 99 respond with 'NEW_LABEL_NEEDED'
          3. Be conservative in code assignment - it's better to assign fewer, highly relevant codes than too many.
@@ -423,6 +423,27 @@ def process_responses(responses_df: pd.DataFrame, codes_df: pd.DataFrame,
                 if j % max(1, len(unique_responses)//100) == 0 and status_callback:
                     status_callback(f"Procesando {col}: {j+1}/{len(unique_responses)}")
                 
+                # Check if this cell was already manually coded/processed
+                mask = responses_df[col] == response
+                existing_codes_for_response = responses_df.loc[mask, code_column].unique()
+                
+                skip_processing = False
+                for ec in existing_codes_for_response:
+                    if pd.notna(ec) and str(ec).strip() != "":
+                        codes_list = [c.strip() for c in str(ec).split(';') if c.strip().isdigit()]
+                        if len(codes_list) > 0:
+                            if '77' in codes_list:
+                                skip_processing = False
+                            else:
+                                skip_processing = True
+                        break
+                
+                if skip_processing:
+                    processed_records += 1
+                    if progress_callback and total_records > 0:
+                        progress_callback(processed_records / total_records)
+                    continue
+
                 for question in relevant_questions:
                     if question not in questions_dict:
                         continue
