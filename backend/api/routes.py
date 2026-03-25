@@ -425,7 +425,16 @@ async def process_survey_task(session_id: str, config: Dict[str, Any], is_resume
         final_responses_path = os.path.join(session_dir, f"responses_coded_final_{timestamp}.xlsx")
         final_codes_path = os.path.join(session_dir, f"codes_coded_final_{timestamp}.xlsx")
         
-        processor.save_results(processed_responses_df, updated_codes_df, final_responses_path, final_codes_path)
+        await ws_manager.emit_status(session_id, 'processing', 'Guardando archivo final (esto puede tardar unos minutos en archivos pesados)...')
+        
+        await loop.run_in_executor(
+            None, 
+            processor.save_results, 
+            processed_responses_df, 
+            updated_codes_df, 
+            final_responses_path, 
+            final_codes_path
+        )
         
         # Update results
         current_results = {
