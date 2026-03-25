@@ -926,3 +926,58 @@ async def download_reviewed(session_id: str):
     except Exception as e:
         print(f"Error in download_reviewed endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.get("/temp-files")
+async def list_temp_files():
+    """
+    List all Excel files in the temp_uploads directory
+    """
+    try:
+        temp_dir = session_manager.temp_dir
+        if not os.path.exists(temp_dir):
+            return {"files": []}
+            
+        files = []
+        for filename in os.listdir(temp_dir):
+            if filename.endswith(('.xlsx', '.xls')):
+                filepath = os.path.join(temp_dir, filename)
+                stat = os.stat(filepath)
+                # Ensure it's a file
+                if os.path.isfile(filepath):
+                    files.append({
+                        "name": filename,
+                        "size": stat.st_size,
+                        "modified": stat.st_mtime
+                    })
+                    
+        # Sort by modified time descending (newest first)
+        files.sort(key=lambda x: x["modified"], reverse=True)
+        return {"files": files}
+    except Exception as e:
+        print(f"Error listing temp files: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.get("/temp-files/{filename}")
+async def download_temp_file(filename: str):
+    """
+    Download a specific file from the temp_uploads directory
+    """
+    try:
+        # Prevent directory traversal
+        filename = os.path.basename(filename)
+        temp_dir = session_manager.temp_dir
+        file_path = os.path.join(temp_dir, filename)
+        
+        if not os.path.exists(file_path) or not os.path.isfile(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
+            
+        return FileResponse(
+            path=file_path,
+            filename=filename,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error downloading temp file: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
