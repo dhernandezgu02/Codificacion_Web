@@ -125,9 +125,16 @@ const TempFilesList: React.FC<TempFilesListProps> = ({ onBack }) => {
                           <svg className="w-5 h-5 text-green-600 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                           </svg>
-                          <span className="text-sm font-medium text-gray-900 truncate max-w-xs">
-                            {file.name}
-                          </span>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium text-gray-900 truncate max-w-xs" title={file.name.split('/').pop() || file.name}>
+                              {file.name.split('/').pop() || file.name}
+                            </span>
+                            {file.name.includes('/') && (
+                              <span className="text-xs text-gray-500 truncate max-w-xs" title={`Sesión: ${file.name.split('/')[0]}`}>
+                                {file.name.split('/')[0]}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

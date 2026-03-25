@@ -930,7 +930,7 @@ async def download_reviewed(session_id: str):
 @router.get("/temp-files")
 async def list_temp_files():
     """
-    List all Excel files in the temp_uploads directory
+    List all Excel files in the temp_uploads directory and subdirectories
     """
     try:
         temp_dir = session_manager.temp_dir
@@ -938,14 +938,18 @@ async def list_temp_files():
             return {"files": []}
             
         files = []
-        for filename in os.listdir(temp_dir):
-            if filename.endswith(('.xlsx', '.xls')):
-                filepath = os.path.join(temp_dir, filename)
-                stat = os.stat(filepath)
-                # Ensure it's a file
-                if os.path.isfile(filepath):
+        for root, _, filenames in os.walk(temp_dir):
+            for filename in filenames:
+                if filename.endswith(('.xlsx', '.xls')):
+                    filepath = os.path.join(root, filename)
+                    # Relative path to temp_dir
+                    rel_path = os.path.relpath(filepath, temp_dir)
+                    # Use forward slashes for URLs
+                    rel_path = rel_path.replace(os.sep, '/')
+                    
+                    stat = os.stat(filepath)
                     files.append({
-                        "name": filename,
+                        "name": rel_path,
                         "size": stat.st_size,
                         "modified": stat.st_mtime
                     })
@@ -957,22 +961,26 @@ async def list_temp_files():
         print(f"Error listing temp files: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@router.get("/temp-files/{filename}")
-async def download_temp_file(filename: str):
+@router.get("/temp-files/{file_path:path}")
+async def download_temp_file(file_path: str):
     """
     Download a specific file from the temp_uploads directory
     """
     try:
         # Prevent directory traversal
-        filename = os.path.basename(filename)
+        if '..' in file_path or file_path.startswith('/'):
+            raise HTTPException(status_code=400, detail="Invalid path")
+            
         temp_dir = session_manager.temp_dir
-        file_path = os.path.join(temp_dir, filename)
+        full_path = os.path.join(temp_dir, file_path)
         
-        if not os.path.exists(file_path) or not os.path.isfile(file_path):
+        if not os.path.exists(full_path) or not os.path.isfile(full_path):
             raise HTTPException(status_code=404, detail="File not found")
             
+        filename = os.path.basename(full_path)
+            
         return FileResponse(
-            path=file_path,
+            path=full_path,
             filename=filename,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )

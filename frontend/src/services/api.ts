@@ -151,6 +151,8 @@ export const getTempFiles = async (): Promise<{ files: Array<{name: string, size
 /**
  * Get download URL for a temporary file
  */
-export const getTempFileDownloadUrl = (filename: string): string => {
-  return `${API_URL}/api/temp-files/${encodeURIComponent(filename)}`;
+export const getTempFileDownloadUrl = (file_path: string): string => {
+  // Encode each path segment separately so slashes remain intact
+  const encodedPath = file_path.split('/').map(encodeURIComponent).join('/');
+  return `${API_URL}/api/temp-files/${encodedPath}`;
 };
