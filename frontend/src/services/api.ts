@@ -139,3 +139,18 @@ export const healthCheck = async (): Promise<{ status: string }> => {
   const response = await apiClient.get('/health');
   return response.data;
 };
+
+/**
+ * Get list of temporary files
+ */
+export const getTempFiles = async (): Promise<{ files: Array<{name: string, size: number, modified: number}> }> => {
+  const response = await apiClient.get('/api/temp-files');
+  return response.data;
+};
+
+/**
+ * Get download URL for a temporary file
+ */
+export const getTempFileDownloadUrl = (filename: string): string => {
+  return `${API_URL}/api/temp-files/${encodeURIComponent(filename)}`;
+};

@@ -1,7 +1,7 @@
 import React from 'react';
 
 interface HomeMenuProps {
-  onSelectOption: (option: 'codify' | 'review') => void;
+  onSelectOption: (option: 'codify' | 'review' | 'temp-files') => void;
 }
 
 const HomeMenu: React.FC<HomeMenuProps> = ({ onSelectOption }) => {
@@ -17,15 +17,15 @@ const HomeMenu: React.FC<HomeMenuProps> = ({ onSelectOption }) => {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Option 1: Codify New Responses */}
           <button
             onClick={() => onSelectOption('codify')}
-            className="group relative flex flex-col items-center p-8 bg-white border-2 border-blue-100 rounded-xl hover:border-blue-500 hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 text-left"
+            className="group relative flex flex-col items-center p-6 bg-white border-2 border-blue-100 rounded-xl hover:border-blue-500 hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 text-left"
           >
-            <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mb-6 group-hover:bg-blue-500 transition-colors duration-300">
+            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4 group-hover:bg-blue-500 transition-colors duration-300">
               <svg
-                className="w-10 h-10 text-blue-600 group-hover:text-white transition-colors duration-300"
+                className="w-8 h-8 text-blue-600 group-hover:text-white transition-colors duration-300"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -38,22 +38,22 @@ const HomeMenu: React.FC<HomeMenuProps> = ({ onSelectOption }) => {
                 />
               </svg>
             </div>
-            <h3 className="text-2xl font-bold text-gray-800 mb-3 group-hover:text-blue-600 transition-colors">
+            <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-blue-600 transition-colors text-center">
               Codificar Nuevas Respuestas
             </h3>
-            <p className="text-gray-500 text-center leading-relaxed">
-              Sube tus archivos de respuestas y códigos para iniciar un nuevo proceso de codificación automática.
+            <p className="text-sm text-gray-500 text-center leading-relaxed">
+              Sube tus archivos de respuestas y códigos para codificación automática.
             </p>
           </button>
 
           {/* Option 2: Review Existing Coding */}
           <button
             onClick={() => onSelectOption('review')}
-            className="group relative flex flex-col items-center p-8 bg-white border-2 border-purple-100 rounded-xl hover:border-purple-500 hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 text-left"
+            className="group relative flex flex-col items-center p-6 bg-white border-2 border-purple-100 rounded-xl hover:border-purple-500 hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 text-left"
           >
-            <div className="w-20 h-20 bg-purple-100 rounded-full flex items-center justify-center mb-6 group-hover:bg-purple-500 transition-colors duration-300">
+            <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4 group-hover:bg-purple-500 transition-colors duration-300">
               <svg
-                className="w-10 h-10 text-purple-600 group-hover:text-white transition-colors duration-300"
+                className="w-8 h-8 text-purple-600 group-hover:text-white transition-colors duration-300"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -66,11 +66,39 @@ const HomeMenu: React.FC<HomeMenuProps> = ({ onSelectOption }) => {
                 />
               </svg>
             </div>
-            <h3 className="text-2xl font-bold text-gray-800 mb-3 group-hover:text-purple-600 transition-colors">
+            <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-purple-600 transition-colors text-center">
               Revisar Codificación Existente
             </h3>
-            <p className="text-gray-500 text-center leading-relaxed">
-              Sube archivos ya codificados para que la IA verifique la calidad y sugiera correcciones.
+            <p className="text-sm text-gray-500 text-center leading-relaxed">
+              Sube archivos ya codificados para que la IA sugiera correcciones.
+            </p>
+          </button>
+
+          {/* Option 3: Recover Temporary Files */}
+          <button
+            onClick={() => onSelectOption('temp-files')}
+            className="group relative flex flex-col items-center p-6 bg-white border-2 border-emerald-100 rounded-xl hover:border-emerald-500 hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 text-left"
+          >
+            <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mb-4 group-hover:bg-emerald-500 transition-colors duration-300">
+              <svg
+                className="w-8 h-8 text-emerald-600 group-hover:text-white transition-colors duration-300"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                />
+              </svg>
+            </div>
+            <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-emerald-600 transition-colors text-center">
+              Archivos Temporales
+            </h3>
+            <p className="text-sm text-gray-500 text-center leading-relaxed">
+              Descarga archivos guardados de procesos anteriores o interrumpidos.
             </p>
           </button>
         </div>

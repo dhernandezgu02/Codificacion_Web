@@ -7,6 +7,7 @@ import Configuration from './components/Configuration';
 import ProcessingMonitor from './components/ProcessingMonitor';
 import Results from './components/Results';
 import ManualCoding from './components/ManualCoding';
+import TempFilesList from './components/TempFilesList';
 import { wsClient } from './services/websocket';
 import { startProcessing, startReview, handleAPIError, cleanupSession } from './services/api';
 import type {
@@ -25,7 +26,11 @@ function App() {
   const [pendingConfig, setPendingConfig] = useState<ProcessingConfig | null>(null);
   const [mode, setMode] = useState<'codify' | 'review'>('codify'); // New state for mode
 
-  const handleMenuSelection = (option: 'codify' | 'review') => {
+  const handleMenuSelection = (option: 'codify' | 'review' | 'temp-files') => {
+    if (option === 'temp-files') {
+      setStep('temp-files');
+      return;
+    }
     setMode(option);
     if (option === 'codify') {
         setStep('upload');
@@ -231,6 +236,10 @@ function App() {
           onReset={handleReset}
           onStartReview={() => setStep('processing')}
         />
+      )}
+
+      {step === 'temp-files' && (
+        <TempFilesList onBack={() => setStep('home')} />
       )}
     </div>
   );
